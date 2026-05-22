@@ -5,6 +5,7 @@ import torch
 import inspect
 import execution
 import server
+from aiohttp import web
 
 try:
     import psutil
@@ -31,6 +32,7 @@ class ExecutionTime:
 
 
 CURRENT_START_EXECUTION_DATA = None
+EXECUTION_TIME_CONSOLE_LOGGING_ENABLED = True
 
 
 # def get_free_vram():
@@ -86,7 +88,8 @@ def handle_execute(class_type, last_node_id, prompt_id, server, unique_id):
         end_ram = get_current_ram_usage()
         ram_used = end_ram - start_ram if start_ram is not None else 0
 
-        print(f"end_vram - start_vram: {end_vram} - {start_vram} = {vram_used}")
+        if EXECUTION_TIME_CONSOLE_LOGGING_ENABLED:
+            print(f"end_vram - start_vram: {end_vram} - {start_vram} = {vram_used}")
         if server.client_id is not None and last_node_id != server.last_node_id:
             server.send_sync(
                 "TyDev-Utils.ExecutionTime.executed",
@@ -94,7 +97,8 @@ def handle_execute(class_type, last_node_id, prompt_id, server, unique_id):
                  "vram_used": vram_used, "ram_used": ram_used},
                 server.client_id
             )
-        print(f"#{unique_id} [{class_type}]: {execution_time:.2f}s - vram {vram_used}b - ram {ram_used}b")
+        if EXECUTION_TIME_CONSOLE_LOGGING_ENABLED:
+            print(f"#{unique_id} [{class_type}]: {execution_time:.2f}s - vram {vram_used}b - ram {ram_used}b")
 
 
 try:
@@ -192,3 +196,11 @@ def dev_utils_send_sync(self, event, data, sid=None):
 
 
 server.PromptServer.send_sync = dev_utils_send_sync
+
+
+@server.PromptServer.instance.routes.post("/ty-dev-utils/execution-time/console-logging")  # noqa
+async def set_execution_time_console_logging(request: web.Request) -> web.StreamResponse:
+    global EXECUTION_TIME_CONSOLE_LOGGING_ENABLED
+    data = await request.json()
+    EXECUTION_TIME_CONSOLE_LOGGING_ENABLED = bool(data.get('enabled'))
+    return web.json_response({'enabled': EXECUTION_TIME_CONSOLE_LOGGING_ENABLED})
