@@ -1,9 +1,15 @@
+import os
 import time
 
 import torch
 import inspect
 import execution
 import server
+
+try:
+    import psutil
+except Exception:  # noqa
+    psutil = None
 
 
 # import model_management
@@ -49,26 +55,46 @@ def reset_peak_memory_record():
     torch.cuda.reset_max_memory_allocated(device)
 
 
+def get_current_ram_usage():
+    if psutil is not None:
+        try:
+            return psutil.Process(os.getpid()).memory_info().rss
+        except Exception:  # noqa
+            pass
+
+    try:
+        with open('/proc/self/statm', 'r', encoding='utf-8') as statm:
+            rss_pages = int(statm.readline().split()[1])
+        return rss_pages * os.sysconf('SC_PAGE_SIZE')
+    except Exception:  # noqa
+        return 0
+
+
 def handle_execute(class_type, last_node_id, prompt_id, server, unique_id):
     if not CURRENT_START_EXECUTION_DATA:
         return
     start_time = CURRENT_START_EXECUTION_DATA['nodes_start_perf_time'].get(unique_id)
     start_vram = CURRENT_START_EXECUTION_DATA['nodes_start_vram'].get(unique_id)
+    start_ram = CURRENT_START_EXECUTION_DATA['nodes_start_ram'].get(unique_id)
     if start_time:
         end_time = time.perf_counter()
         execution_time = end_time - start_time
 
         end_vram = get_peak_memory()
-        vram_used = end_vram - start_vram
+        vram_used = end_vram - start_vram if start_vram is not None else 0
+
+        end_ram = get_current_ram_usage()
+        ram_used = end_ram - start_ram if start_ram is not None else 0
+
         print(f"end_vram - start_vram: {end_vram} - {start_vram} = {vram_used}")
         if server.client_id is not None and last_node_id != server.last_node_id:
             server.send_sync(
                 "TyDev-Utils.ExecutionTime.executed",
                 {"node": unique_id, "prompt_id": prompt_id, "execution_time": int(execution_time * 1000),
-                 "vram_used": vram_used},
+                 "vram_used": vram_used, "ram_used": ram_used},
                 server.client_id
             )
-        print(f"#{unique_id} [{class_type}]: {execution_time:.2f}s - vram {vram_used}b")
+        print(f"#{unique_id} [{class_type}]: {execution_time:.2f}s - vram {vram_used}b - ram {ram_used}b")
 
 
 try:
@@ -132,8 +158,10 @@ def dev_utils_send_sync(self, event, data, sid=None):
     if event == "execution_start":
         CURRENT_START_EXECUTION_DATA = dict(
             start_perf_time=time.perf_counter(),
+            start_ram=get_current_ram_usage(),
             nodes_start_perf_time={},
-            nodes_start_vram={}
+            nodes_start_vram={},
+            nodes_start_ram={}
         )
 
     origin_func(self, event=event, data=data, sid=sid)
@@ -142,10 +170,13 @@ def dev_utils_send_sync(self, event, data, sid=None):
         if data.get("node") is None:
             if sid is not None:
                 start_perf_time = CURRENT_START_EXECUTION_DATA.get('start_perf_time')
+                start_ram = CURRENT_START_EXECUTION_DATA.get('start_ram')
                 new_data = data.copy()
                 if start_perf_time is not None:
                     execution_time = time.perf_counter() - start_perf_time
                     new_data['execution_time'] = int(execution_time * 1000)
+                if start_ram is not None:
+                    new_data['ram_used'] = get_current_ram_usage() - start_ram
                 origin_func(
                     self,
                     event="TyDev-Utils.ExecutionTime.execution_end",
@@ -157,6 +188,7 @@ def dev_utils_send_sync(self, event, data, sid=None):
             CURRENT_START_EXECUTION_DATA['nodes_start_perf_time'][node_id] = time.perf_counter()
             reset_peak_memory_record()
             CURRENT_START_EXECUTION_DATA['nodes_start_vram'][node_id] = get_peak_memory()
+            CURRENT_START_EXECUTION_DATA['nodes_start_ram'][node_id] = get_current_ram_usage()
 
 
 server.PromptServer.send_sync = dev_utils_send_sync
