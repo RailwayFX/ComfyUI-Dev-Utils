@@ -29,16 +29,86 @@ function formatExecutionTime(time) {
 
 // Reference: https://gist.github.com/zentala/1e6f72438796d74531803cc3833c039c
 function formatBytes(bytes, decimals) {
+    if (bytes === undefined || bytes === null || isNaN(bytes)) {
+        return '';
+    }
     if (bytes === 0) {
         return '0 B'
     }
+    const sign = bytes < 0 ? '-' : '';
+    const absBytes = Math.abs(bytes);
     const k = 1024,
         dm = decimals || 2,
-        sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'],
-        i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'],
+        i = Math.floor(Math.log(absBytes) / Math.log(k));
+    return sign + parseFloat((absBytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+function getNodeFromGraph(graph, nodeId) {
+    if (!graph) {
+        return null;
+    }
+    return graph.getNodeById?.(nodeId)
+        ?? graph._nodes_by_id?.[nodeId]
+        ?? graph._nodes?.find((node) => String(node.id) === String(nodeId))
+        ?? null;
+}
+
+function findNode(nodeId) {
+    const parts = String(nodeId).split(":").filter((part) => part.length > 0);
+    if (!parts.length) {
+        return null;
+    }
+
+    let graph = app.graph;
+    let node = null;
+    for (const part of parts) {
+        node = getNodeFromGraph(graph, part);
+        graph = node?.subgraph;
+        if (!node) {
+            return null;
+        }
+    }
+    return node;
+}
+
+function forEachGraphNode(graph, callback, visitedGraphs = new Set()) {
+    if (!graph || visitedGraphs.has(graph)) {
+        return;
+    }
+    visitedGraphs.add(graph);
+    graph._nodes?.forEach((node) => {
+        callback(node);
+        forEachGraphNode(node.subgraph, callback, visitedGraphs);
+    });
+}
+
+function swizzleNodeDrawForeground(node) {
+    if (!node || node.ty_et_swizzled) {
+        return;
+    }
+
+    let orig = node.onDrawForeground;
+    if (!orig) {
+        orig = node.__proto__.onDrawForeground;
+    }
+
+    node.onDrawForeground = function (ctx) {
+        drawBadge(node, orig, arguments)
+    };
+    node.ty_et_swizzled = true;
+}
+
+function buildMemoryText(node) {
+    const memoryParts = [];
+    if (node.ty_et_vram_used !== undefined) {
+        memoryParts.push("vram " + formatBytes(node.ty_et_vram_used, 2));
+    }
+    if (node.ty_et_ram_used !== undefined) {
+        memoryParts.push("ram " + formatBytes(node.ty_et_ram_used, 2));
+    }
+    return memoryParts.join(" - ");
+}
 
 // Reference: https://github.com/ltdrdata/ComfyUI-Manager/blob/main/js/comfyui-manager.js
 function drawBadge(node, orig, restArgs) {
@@ -48,7 +118,8 @@ function drawBadge(node, orig, restArgs) {
     if (!node.flags.collapsed && node.constructor.title_mode != LiteGraph.NO_TITLE) {
         let text = "";
         if (node.ty_et_execution_time !== undefined) {
-            text = formatExecutionTime(node.ty_et_execution_time) + " - vram " + formatBytes(node.ty_et_vram_used, 2);
+            const memoryText = buildMemoryText(node);
+            text = formatExecutionTime(node.ty_et_execution_time) + (memoryText ? " - " + memoryText : "");
         } else if (node.ty_et_start_time !== undefined) {
             text = formatExecutionTime(LiteGraph.getTime() - node.ty_et_start_time);
         }
@@ -154,7 +225,8 @@ function buildTableHtml() {
                 $el("th", {style: headerThStyle, "textContent": "Current Time"}),
                 $el("th", {style: headerThStyle, "textContent": "Per Time"}),
                 $el("th", {style: headerThStyle, "textContent": "Cur / Pre Time Diff"}),
-                $el("th", {style: headerThStyle, "textContent": "VRAM Used"})
+                $el("th", {style: headerThStyle, "textContent": "VRAM Used"}),
+                $el("th", {style: headerThStyle, "textContent": "RAM Used"})
             ])
         ]),
         tableBody,
@@ -186,11 +258,12 @@ function buildTableHtml() {
 
     let max_execution_time = null
     let max_vram_used = null
+    let max_ram_used = null
 
     runningData.nodes_execution_time.forEach(function (item) {
         const nodeId = item.node;
-        const node = app.graph.getNodeById(nodeId)
-        const title = node?.title ?? nodeId
+        const node = findNode(nodeId)
+        const title = (node?.title || node?.type) ?? nodeId
         const preExecutionTime = lastRunningDate?.nodes_execution_time?.find(x => x.node === nodeId)?.execution_time
 
         const [diffColor, diffText] = diff(item.execution_time, preExecutionTime);
@@ -201,6 +274,10 @@ function buildTableHtml() {
 
         if (max_vram_used == null || item.vram_used > max_vram_used) {
             max_vram_used = item.vram_used
+        }
+
+        if (max_ram_used == null || item.ram_used > max_ram_used) {
+            max_ram_used = item.ram_used
         }
 
         tableBody.append($el("tr", {
@@ -226,6 +303,7 @@ function buildTableHtml() {
                 "textContent": diffText
             }),
             $el("td", {style: {"textAlign": "right"}, "textContent": formatBytes(item.vram_used, 2)}),
+            $el("td", {style: {"textAlign": "right"}, "textContent": formatBytes(item.ram_used, 2)}),
         ]))
     });
     if (runningData.total_execution_time !== null) {
@@ -253,6 +331,10 @@ function buildTableHtml() {
                 style: {"textAlign": "right"},
                 "textContent": max_vram_used != null ? formatBytes(max_vram_used, 2) : ''
             }),
+            $el("td", {
+                style: {"textAlign": "right"},
+                "textContent": max_ram_used != null ? formatBytes(max_ram_used, 2) : ''
+            }),
         ]))
 
         tableFooter.append($el("tr", [
@@ -274,13 +356,14 @@ function buildTableHtml() {
                 "textContent": diffText
             }),
             $el("td", {style: {"textAlign": "right"}, "textContent": ""}),
+            $el("td", {style: {"textAlign": "right"}, "textContent": formatBytes(runningData.total_ram_used, 2)}),
         ]))
     }
     return table;
 }
 
 function refreshTable() {
-    app.graph._nodes.forEach(function (node) {
+    forEachGraphNode(app.graph, function (node) {
         if (node.comfyClass === "TY_ExecutionTime" && node.widgets) {
             const tableWidget = node.widgets.find((w) => w.name === "Table");
             if (!tableWidget) {
@@ -304,25 +387,29 @@ app.registerExtension({
             if (!nodeId) { // Finish
                 return
             }
-            const node = app.graph.getNodeById(nodeId)
+            const node = findNode(nodeId)
             if (node) {
+                swizzleNodeDrawForeground(node);
                 node.ty_et_start_time = LiteGraph.getTime();
             }
         });
 
         api.addEventListener("TyDev-Utils.ExecutionTime.executed", ({detail}) => {
-            const node = app.graph.getNodeById(detail.node)
+            const node = findNode(detail.node)
             if (node) {
+                swizzleNodeDrawForeground(node);
                 node.ty_et_execution_time = detail.execution_time;
                 node.ty_et_vram_used = detail.vram_used;
+                node.ty_et_ram_used = detail.ram_used;
             }
             const index = runningData.nodes_execution_time.findIndex(x => x.node === detail.node);
             const data = {
                 node: detail.node,
                 execution_time: detail.execution_time,
-                vram_used: detail.vram_used
+                vram_used: detail.vram_used,
+                ram_used: detail.ram_used
             };
-            if (index > 0) {
+            if (index >= 0) {
                 runningData.nodes_execution_time[index] = data
             } else {
                 runningData.nodes_execution_time.push(data)
@@ -335,14 +422,16 @@ app.registerExtension({
                 return;
             }
             lastRunningDate = runningData;
-            app.graph._nodes.forEach(function (node) {
+            forEachGraphNode(app.graph, function (node) {
                 delete node.ty_et_start_time
                 delete node.ty_et_execution_time
                 delete node.ty_et_vram_used
+                delete node.ty_et_ram_used
             });
             runningData = {
                 nodes_execution_time: [],
-                total_execution_time: null
+                total_execution_time: null,
+                total_ram_used: null
             };
             startRefreshTimer();
         });
@@ -350,30 +439,15 @@ app.registerExtension({
         api.addEventListener("TyDev-Utils.ExecutionTime.execution_end", ({detail}) => {
             stopRefreshTimer();
             runningData.total_execution_time = detail.execution_time;
+            runningData.total_ram_used = detail.ram_used;
             refreshTable();
         })
     },
     async nodeCreated(node, app) {
-        if (!node.ty_et_swizzled) {
-            let orig = node.onDrawForeground;
-            if (!orig) {
-                orig = node.__proto__.onDrawForeground;
-            }
-
-            node.onDrawForeground = function (ctx) {
-                drawBadge(node, orig, arguments)
-            };
-            node.ty_et_swizzled = true;
-        }
+        swizzleNodeDrawForeground(node);
     },
     async loadedGraphNode(node, app) {
-        if (!node.ty_et_swizzled) {
-            const orig = node.onDrawForeground;
-            node.onDrawForeground = function (ctx) {
-                drawBadge(node, orig, arguments)
-            };
-            node.ty_et_swizzled = true;
-        }
+        swizzleNodeDrawForeground(node);
     },
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
         if (nodeType.comfyClass === "TY_ExecutionTime") {
@@ -393,7 +467,7 @@ app.registerExtension({
                 const thUnscaledHeight = 24;
                 const tableUnscaledHeight = thUnscaledHeight * tableHeight / thHeight;
                 const autoResizeMaxHeight = 300;
-                return [Math.max(originSize[0], 600), originSize[1] + Math.min(tableUnscaledHeight, autoResizeMaxHeight) - LiteGraph.NODE_WIDGET_HEIGHT];
+                return [Math.max(originSize[0], 700), originSize[1] + Math.min(tableUnscaledHeight, autoResizeMaxHeight) - LiteGraph.NODE_WIDGET_HEIGHT];
             }
 
             const nodeCreated = nodeType.prototype.onNodeCreated;
