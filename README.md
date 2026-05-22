@@ -27,13 +27,14 @@ Features
 
 1. Execution Time Analysis Tool
     - When running, a Badge will be added to the upper left corner of the Node to display the execution time of the
-      node.
+      node, VRAM usage, and RAM usage.
       <details open>
       <summary>Preview</summary>
       <img src="https://github.com/ty0x2333/ComfyUI-Dev-Utils/wiki/images/execution-time-badge.png" style="height: 150px">
       </details>
     - Add `Execution Time` Node to display the execution time of each node in a table. At the same time, the current
-      execution time and the last execution time, as well as their differences, will be displayed.
+      execution time and the last execution time, as well as their differences, will be displayed. The table also shows
+      VRAM and RAM usage for each executed node, including nodes inside subgraphs.
       <details open>
       <summary>Preview</summary>
 
