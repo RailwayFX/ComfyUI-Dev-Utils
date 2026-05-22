@@ -30,9 +30,11 @@ Features
       node, VRAM usage, and RAM usage.
       <details open>
       <summary>Preview</summary>
-      <img src="https://github.com/ty0x2333/ComfyUI-Dev-Utils/wiki/images/execution-time-badge.png" style="height: 150px">
+        <img width="300" alt="image" src="https://github.com/user-attachments/assets/2e1ae1db-f890-4f87-b252-50bac8488b9b" />
+
       </details>
-    - Add `Execution Time` Node to display the execution time of each node in a table. At the same time, the current
+
+      - Add `Execution Time` Node to display the execution time of each node in a table. At the same time, the current
       execution time and the last execution time, as well as their differences, will be displayed. The table also shows
       VRAM and RAM usage for each executed node, including nodes inside subgraphs.
       <details open>
@@ -55,7 +57,7 @@ Features
 
    </details>
 
-2. Log Console
+1. Log Console
 
    Provide a Console panel to display **Python logs** (**not** Javascript console.log).
 
