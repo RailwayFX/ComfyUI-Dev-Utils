@@ -378,10 +378,31 @@ function refreshTable() {
     });
 }
 
+async function setExecutionTimeConsoleLoggingEnabled(enabled) {
+    try {
+        await api.fetchApi(`/ty-dev-utils/execution-time/console-logging`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({enabled})
+        });
+    } catch (e) {
+        console.warn("Failed to update ExecutionTime console logging setting", e);
+    }
+}
+
 app.registerExtension({
     name: "TyDev-Utils.ExecutionTime",
     async setup() {
         setupClearExecutionCacheMenu();
+        const consoleLoggingEnabled = app.ui.settings.addSetting({
+            id: "TyDev-Utils.ExecutionTime.ConsoleLogging.Enabled",
+            name: "TyDev ExecutionTime Console Logging Enabled",
+            type: "boolean",
+            defaultValue: true,
+            onChange: setExecutionTimeConsoleLoggingEnabled
+        });
+        await setExecutionTimeConsoleLoggingEnabled(consoleLoggingEnabled);
+
         api.addEventListener("executing", ({detail}) => {
             const nodeId = detail;
             if (!nodeId) { // Finish
