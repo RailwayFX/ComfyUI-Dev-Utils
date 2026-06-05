@@ -1,10 +1,12 @@
 import os
 import time
+import json
 
 import torch
 import inspect
 import execution
 import server
+import folder_paths
 from aiohttp import web
 
 try:
@@ -32,7 +34,39 @@ class ExecutionTime:
 
 
 CURRENT_START_EXECUTION_DATA = None
-EXECUTION_TIME_CONSOLE_LOGGING_ENABLED = True
+EXECUTION_TIME_CONSOLE_LOGGING_SETTING_ID = "TyDev-Utils.ExecutionTime.ConsoleLogging.Enabled"
+EXECUTION_TIME_CONSOLE_LOGGING_DEFAULT = True
+
+
+def read_execution_time_console_logging_setting():
+    try:
+        settings_path = os.path.join(
+            folder_paths.get_user_directory(),
+            "default",
+            "comfy.settings.json"
+        )
+
+        if not os.path.isfile(settings_path):
+            return EXECUTION_TIME_CONSOLE_LOGGING_DEFAULT
+
+        with open(settings_path, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+
+        value = settings.get(
+            EXECUTION_TIME_CONSOLE_LOGGING_SETTING_ID,
+            EXECUTION_TIME_CONSOLE_LOGGING_DEFAULT
+        )
+
+        if isinstance(value, bool):
+            return value
+
+        return EXECUTION_TIME_CONSOLE_LOGGING_DEFAULT
+    except Exception as e:
+        print(f"[TyDev-Utils] Failed to read ExecutionTime console logging setting: {e}")
+        return EXECUTION_TIME_CONSOLE_LOGGING_DEFAULT
+
+
+EXECUTION_TIME_CONSOLE_LOGGING_ENABLED = read_execution_time_console_logging_setting()
 
 
 # def get_free_vram():
@@ -202,5 +236,10 @@ server.PromptServer.send_sync = dev_utils_send_sync
 async def set_execution_time_console_logging(request: web.Request) -> web.StreamResponse:
     global EXECUTION_TIME_CONSOLE_LOGGING_ENABLED
     data = await request.json()
-    EXECUTION_TIME_CONSOLE_LOGGING_ENABLED = bool(data.get('enabled'))
+    enabled = data.get('enabled')
+
+    if not isinstance(enabled, bool):
+        return web.json_response({'error': 'enabled must be boolean'}, status=400)
+
+    EXECUTION_TIME_CONSOLE_LOGGING_ENABLED = enabled
     return web.json_response({'enabled': EXECUTION_TIME_CONSOLE_LOGGING_ENABLED})
